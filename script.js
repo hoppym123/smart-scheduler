@@ -1,15 +1,30 @@
+// In-memory list of tasks loaded from the API.
 let localTasksCache = [];
+
+// Alarm-related variables for the browser notification system.
 let audioCtx = null;
 let alarmOscillator = null;
 let alarmIntervalId = null;
 let alarmTimeoutId = null;
 let vibrationIntervalId = null;
 
+// Request browser notification permission when available.
 if (Notification.permission === "default") {
     Notification.requestPermission();
 }
 
+// Display short feedback messages for save, update, and delete actions.
+function setStatus(message, isError = false) {
+    const statusEl = document.getElementById('statusMessage');
+    if (!statusEl) return;
+
+    statusEl.textContent = message || '';
+    statusEl.style.color = isError ? '#ef4444' : '#0f766e';
+    statusEl.style.display = message ? 'block' : 'none';
+}
+
 // Controllable Persistent Stream Generation 
+// Trigger the alarm UI and device feedback when a task deadline is reached.
 function startAlarmHardwareEngine(taskDescription) {
     // Show UI overlay
     const modal = document.getElementById('alarmModal');
@@ -52,7 +67,7 @@ function startAlarmHardwareEngine(taskDescription) {
     }, 60000); 
 }
 
-// Global cleanup mechanism to kill noise, intervals, and active vibrations cleanly
+// Stop the alarm sound, vibration, and popup cleanly.
 function stopAlarmHardwareEngine() {
     // 1. Hide modal safely
     document.getElementById('alarmModal').classList.remove('active');
@@ -79,12 +94,23 @@ function stopAlarmHardwareEngine() {
     }
 }
 
+// Load all tasks from the backend and re-render the list.
 async function fetchTasks() {
-    const res = await fetch('/api/tasks');
-    localTasksCache = await res.json();
-    renderTasks();
+    try {
+        const res = await fetch('/api/tasks');
+        if (!res.ok) throw new Error('Unable to load tasks');
+
+        const tasks = await res.json();
+        localTasksCache = Array.isArray(tasks) ? tasks : [];
+        renderTasks();
+        setStatus('');
+    } catch (error) {
+        console.error(error);
+        setStatus('Unable to load saved tasks right now.', true);
+    }
 }
 
+// Render each task into the list with its action buttons.
 function renderTasks() {
     const list = document.getElementById('taskList');
     list.innerHTML = '';
@@ -109,69 +135,106 @@ function renderTasks() {
     });
 }
 
-async function addTask() {
+// Save a new task through the API and refresh the UI.
+async function addTask(event) {
+    if (event) event.preventDefault();
+
     const taskInput = document.getElementById('taskInput');
     const timeInput = document.getElementById('timeInput');
-    
-    if (!taskInput.value.trim()) return alert('Task text is empty!');
+    const description = taskInput.value.trim();
 
-    await fetch('/api/tasks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            description: taskInput.value.trim(),
-            alertTime: timeInput.value
-        })
-    });
+    if (!description) {
+        setStatus('Please enter a task description before saving.', true);
+        return;
+    }
 
-    taskInput.value = '';
-    timeInput.value = '';
-    fetchTasks();
+    try {
+        const res = await fetch('/api/tasks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                description,
+                alertTime: timeInput.value || null
+            })
+        });
+
+        if (!res.ok) throw new Error('Unable to save task');
+
+        const createdTask = await res.json();
+        localTasksCache = [...localTasksCache, createdTask];
+        renderTasks();
+        setStatus('Task saved successfully.');
+
+        taskInput.value = '';
+        timeInput.value = '';
+    } catch (error) {
+        console.error(error);
+        setStatus('Unable to save task right now.', true);
+    }
 }
 
+// Mark a task as completed in the backend and update the UI.
 async function toggleComplete(id) {
-    await fetch(`/api/tasks/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ completed: true })
-    });
-    fetchTasks();
+    try {
+        const res = await fetch(`/api/tasks/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ completed: true })
+        });
+
+        if (!res.ok) throw new Error('Unable to update task');
+
+        localTasksCache = localTasksCache.map((task) => task.id === id ? { ...task, completed: true } : task);
+        renderTasks();
+        setStatus('Task completed.');
+    } catch (error) {
+        console.error(error);
+        setStatus('Unable to update task.', true);
+    }
 }
 
+// Delete a task from the backend and update the visible list.
 async function deleteTask(id) {
-    await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
-    fetchTasks();
+    try {
+        const res = await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('Unable to delete task');
+
+        localTasksCache = localTasksCache.filter((task) => task.id !== id);
+        renderTasks();
+        setStatus('Task removed.');
+    } catch (error) {
+        console.error(error);
+        setStatus('Unable to remove task.', true);
+    }
 }
 
-// Clock Threading Daemon checking deadlines every 1000ms
+// Periodically check whether any task has reached its scheduled time.
 setInterval(() => {
     const now = new Date().getTime();
 
-    localTasksCache.forEach(async (task) => {
+    for (const task of [...localTasksCache]) {
         if (task.alertTime && !task.completed && !task.notified) {
             const taskTime = new Date(task.alertTime).getTime();
-            
+
             if (now >= taskTime) {
-                task.notified = true; 
-                
-                // Boot up running alarm/vibration instance
+                task.notified = true;
+
                 startAlarmHardwareEngine(task.description);
 
-                // OS Level push messaging fallback
-                if (Notification.permission === "granted") {
-                    new Notification("🚨 Task Deadline Met!", {
+                if (Notification.permission === 'granted') {
+                    new Notification('🚨 Task Deadline Met!', {
                         body: `Time is up for: ${task.description}`,
                     });
                 }
 
-                await fetch(`/api/tasks/${task.id}`, {
+                fetch(`/api/tasks/${task.id}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ notified: true })
-                });
+                }).catch(console.error);
             }
         }
-    });
+    }
 }, 1000);
 
 fetchTasks();
