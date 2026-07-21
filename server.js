@@ -4,7 +4,7 @@ const path = require('path');
 const app = express();
 
 app.use(express.json());
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname)));
 
 const FILE_PATH = path.join(__dirname, 'tasks.json');
 
@@ -72,4 +72,8 @@ app.delete('/api/tasks/:id', async (req, res) => {
     res.json({ success: true, message: "Task deleted successfully" });
 });
 
-app.listen(3000, () => console.log('🚀 Senior-level server running at http://localhost:3000'));
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+app.listen(8080, () => console.log('🚀 Senior-level server running at http://localhost:8080'));

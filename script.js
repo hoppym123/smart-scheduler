@@ -9,7 +9,7 @@ if (Notification.permission === "default") {
     Notification.requestPermission();
 }
 
-// 10-Year Senior Engineering Pattern: Controllable Persistent Stream Generation 
+// Controllable Persistent Stream Generation 
 function startAlarmHardwareEngine(taskDescription) {
     // Show UI overlay
     const modal = document.getElementById('alarmModal');

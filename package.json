@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json.schemastore.org/package",
   "name": "web-task-manager",
   "version": "1.0.0",
   "description": "",
